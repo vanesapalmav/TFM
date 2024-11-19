@@ -31,7 +31,7 @@ filtered_df <- TRY %>%
 
 #Solo con el 28 y 357
 TRY_cuali <- TRYNF %>%
-  ()
+  filter(TraitID %in% c(28, 357))
 
 # Mantener solo el AccSpeciesName con el DataName más frecuente y su frecuencia
 TRY_cuali_filt<- TRY_cuali %>%
@@ -254,11 +254,53 @@ TRY_FA_result <- FA_result %>%
     relationship = "many-to-many"
   )
 
+#UNIR FA_result CON TRY_cuali
+TRY_FA_cuali <- FA_result %>%
+  inner_join(
+    TRY_cuali_filt %>%
+      filter(AccSpeciesName %in% FA_result$taxon_clean & !is.na(TraitName)) %>%
+      select(AccSpeciesName, TraitName, mean_StdValue, sd_StdValue, mean_ErrorRisk, sd_ErrorRisk),
+    by = c("taxon_clean" = "AccSpeciesName"),
+    relationship = "many-to-many"
+  )
+
+#test 1 estudio
+#study1 <- filter
+
+#boxplot
+study1 <- TRY_FA_result %>%
+  filter(id_study == "Nombre_del_Estudio_Especifico")
+
+study1 <- study1 %>%
+  mutate(TraitName = gsub(" ", "\n", TraitName))  # Reemplaza espacios por saltos de línea
+
+ggplot(study1, aes(x = comparacion, y = mean_StdValue)) +
+  geom_boxplot() +
+  facet_grid(TraitName ~ age, scales = "free") +  # Facetas por 'TraitName' y 'age'
+  labs(x = "Comparación", 
+       y = "Mean StdValue", 
+       title = "Boxplot de Comparación vs. Mean StdValue, separado por age y TraitName") +
+  theme_minimal() +
+  theme(
+    axis.text.x = element_text(angle = 90, vjust = 0.5, hjust = 1),  # Textos verticales
+    strip.text.y = element_text(size = 10)  # Tamaño del texto en las facetas (filas)
+  )
+
+
 #Calcular CWM por C/NC
 #QUE HACER SI NO TENGO ABUNDANCIA?
-# CWM <- 
 
 #RASGOS CUANTITATIVOS
+
+# Crear el gráfico jitter
+ggplot(TRYNF, aes(x = comparación, y = DataName)) +
+  geom_jitter(width = 0.2, height = 0.2, alpha = 0.6) +  # Ajusta la dispersión y transparencia
+  labs(
+    x = "Comparación",
+    y = "DataName",
+    title = "Relación entre Comparación y DataName"
+  ) +
+  theme_minimal()
 
 #install.packages("devtools")
 #devtools::install_github("bmaitner/RBIEN")
