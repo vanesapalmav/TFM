@@ -52,6 +52,13 @@ sum(TRY_filt$ErrorRisk > 4, na.rm = TRUE)
 TRYNF <- TRY[TRY$AccSpeciesName %in% FA$taxon_clean & !is.na(TRY$TraitID),
              c("AccSpeciesName","TraitID","TraitName","DataName", "StdValue","ErrorRisk")]
 
+#data frame de especies
+sp <- unique(TRYNF_mean$AccSpeciesName) %<%
+  as.data.frame()
+
+#Para generos calcular media
+#Limpieza de subespecies
+
 #Filtrar valores NA
 summary(TRYNF$StdValue) #NAs are traits that have cathegorical values (e "low")
 TRYNF <- TRYNF[!is.na(TRYNF$StdValue),]
