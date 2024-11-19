@@ -30,6 +30,8 @@ filtered_df <- TRY %>%
   filter(TraitID == 131) 
 #609 no sirve
 
+TRY_cuali <- TRYNF
+
 # Mostrar el dataframe filtrado
 print(filtered_df)
 
@@ -154,18 +156,18 @@ FA_comparisons <- age_mix %>%
 #Contabilizar NC y C, calcular %
 #CODIGO PARA TODOS LOS ESTUDIOS Y SP
 
-analisis_por_estudio_especie <- function(df) {
+# Función para análisis y comparación entre combinaciones de edades
+analisis_study_sp <- function(df) {
+  # Ordenar por edad dentro de cada grupo
   df <- df %>%
-    arrange(age) %>%  # Ordenar por age de menor a mayor
-    mutate(comparacion = case_when(
-      measurement != 0 & lag(measurement) != 0 ~ "SI",       #permanece    
-      measurement == 0 & lag(measurement) == 0 ~ "NO",       #no aparece
-      measurement == 0 & lag(measurement) != 0 ~ "NO",       #desaparece
-      measurement != 0 & lag(measurement) == 0 ~ "SI",       #aparece
-      TRUE ~ NA_character_                                   # Caso por defecto
-    ))
-  return(df)
-}
+    arrange(age) %>%
+    # Generar todas las combinaciones posibles de edad dentro de cada grupo
+    summarise(data = list(combn(age, 2, simplify = FALSE)), .groups = "drop") %>%
+    unnest(cols = c(data)) %>%  # Desanidar las combinaciones
+    rename(age_mix = data) %>%  # Renombrar la columna para claridad
+    mutate(age_n = map_dbl(age_mix, 1),  # Extraer la primera edad de la combinación
+           age_m = map_dbl(age_mix, 2))  # Extraer la segunda edad de la combinación
+  
 
 # Agrupar por id_study y taxon_clean, luego aplicar la función para cada combinación
 FA_result <-
