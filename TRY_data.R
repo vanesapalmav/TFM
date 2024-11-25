@@ -22,12 +22,16 @@ FA_taxon <- read.csv(file='/Users/vanepalmav/Documents/MS Ecología/TFM/DATOS/T
 # Filtrar el dataframe para TraitID igual a 28
 unique(TRY$TraitID)
 filtered_df <- TRY %>%
-  filter(TraitID == 357) 
+  filter(TraitID == 4083) 
 #609 no sirve Plant propagation type
 #4083 pocos datos
 #3364 pocos datos
 #28 Sindrome de dispersion
 #357 Plant vegetation reproduction
+
+#Seleccionar solo ciertas columnas de FA solo cuando coinciden especies de TRY y FA
+TRYNF <- TRY[TRY$AccSpeciesName %in% FA$taxon_clean & !is.na(TRY$TraitID),
+             c("AccSpeciesName","TraitID","TraitName","DataName", "StdValue","ErrorRisk")]
 
 #Solo con el 28 y 357
 TRY_cuali <- TRYNF %>%
@@ -42,19 +46,9 @@ TRY_cuali_filt<- TRY_cuali %>%
   ) %>%
   ungroup()
 
-# Mostrar el dataframe filtrado
-print(filtered_df)
-
-TRY_filt <- TRY[TRY$AccSpeciesName %in% FA$taxon_clean, ]
+#Filtrar por error >4
+TRY_filt <- TRYNF[TRYNF$AccSpeciesName %in% FA$taxon_clean, ]
 sum(TRY_filt$ErrorRisk > 4, na.rm = TRUE)
-
-#Seleccionar solo ciertas columnas de FA solo cuando coinciden especies de TRY y FA
-TRYNF <- TRY[TRY$AccSpeciesName %in% FA$taxon_clean & !is.na(TRY$TraitID),
-             c("AccSpeciesName","TraitID","TraitName","DataName", "StdValue","ErrorRisk")]
-
-#data frame de especies
-sp <- unique(TRYNF_mean$AccSpeciesName) %<%
-  as.data.frame()
 
 #Para generos calcular media
 #Limpieza de subespecies
@@ -64,7 +58,7 @@ summary(TRYNF$StdValue) #NAs are traits that have cathegorical values (e "low")
 TRYNF <- TRYNF[!is.na(TRYNF$StdValue),]
 
 #Filtrar errores <4
-TRYNF<-TRYNF[TRYNF$ErrorRisk < 5, ]
+TRYNF<-TRYNF[TRYNF$ErrorRisk < 4, ]
 
 plot(TRYNF$StdValue)
 summary(TRYNF$ErrorRisk)
@@ -85,26 +79,32 @@ TRYNF_mean <- TRYNF %>%
 #Si sd es NA significa que hay solo 1 observacion
 
 # Cambiar nombres
-unique(TRY$TraitName)
-df <- df %>%
+unique(TRYNF_mean$TraitName)
+TRYNF_mean <- TRYNF_mean %>%
   mutate(TraitName = case_when(
     TraitName == "Stem specific density (SSD, stem dry mass per stem fresh volume) or wood density" ~ "Wood density",
     TraitName == "Seed germination rate (germination efficiency)" ~ "Seed germination rate",
     TraitName == "Plant growth rate relative (plant relative growth rate, RGR)" ~ "Plant growth rate",
     TraitName == "Plant biomass and allometry: Seed number per plant" ~ "Seed number per plant",
-    TraitName == "Plant vegetative reproduction: role of clonal growth organ in plant growth" ~""
+    TraitName == "Leaf area per leaf dry mass (specific leaf area, SLA or 1/LMA) of total leaf area" ~ "Specific leaf area",
+    TraitName == "Photosynthesis A/Ci curve: photosynthetic rate per leaf area" ~ "Photosynthetic rate per leaf area",
     TRUE ~ TraitName
   ))
 
 # Aplicar el logaritmo solo a las filas donde TraitName es "Seed dry mass"
 TRYNF_mean <- TRYNF_mean %>%
-  mutate(StdValue_mean = case_when(
-    TraitName == "Seed dry mass" ~ log(StdValue_mean), # Aplicar log
-    TRUE ~ StdValue_mean                                # Mantener los valores originales
+  mutate(mean_StdValue = case_when(
+    TraitName == "Seed dry mass" ~ log(mean_StdValue), # Aplicar log
+    TRUE ~ mean_StdValue                                # Mantener los valores originales
   ))
+
+#data frame de especies
+sp <- unique(TRYNF_mean$AccSpeciesName) %>%
+  as.data.frame()
 
 #barplot de frecuencias de rasgos
 #trait_counts2
+trait_counts2 <- table(TRYNF_mean$TraitName)
 
 # Crear el barplot sin etiquetas en el eje x
 bp <- barplot(trait_counts2, 
@@ -121,7 +121,7 @@ text(x = bp,
      srt = 45,                      
      adj = 1,                       
      xpd = TRUE,                    
-     cex = 0.8)                     
+     cex = 0.5)                     
 
 #Summary e histograma de los valores de c/trait
 # Resumen por TraitID
@@ -138,8 +138,13 @@ summary_by_trait <- TRYNF_mean %>%
 # Mostrar resumen
 print(summary_by_trait)
 
-# Histograma de mean_StdValue por TraitID
-ggplot(TRYNF, aes(x = mean_StdValue)) +
+#Eliminar rasgos con pocos datos
+TRYNF_mean <- TRYNF_mean %>%
+  filter(TraitName != "Specific leaf area") %>%
+  filter(TraitName != "Photosynthetic rate per leaf area")
+
+# Histograma de mean_StdValue por TraitName
+ggplot(TRYNF_mean, aes(x = mean_StdValue)) +
   geom_histogram(binwidth = 0.5, fill = "blue", color = "black") +  # Ajusta el binwidth según tus datos
   facet_wrap(~ TraitName, scales = "free") +   # Un histograma separado por cada TraitID
   labs(title = "Histograma de mean_StdValue por TraitID", x = "mean_StdValue", y = "Frecuencia") +
@@ -147,13 +152,11 @@ ggplot(TRYNF, aes(x = mean_StdValue)) +
 
 #Tabla de especies versus frecuencias de traitname
 trait_frequencies <- TRYNF_mean %>%
-  # Contar combinaciones de AccSpeciesName y TraitName
   count(AccSpeciesName, TraitName, name = "Frequency") %>%
-  # Convertir a formato ancho
   pivot_wider(
-    names_from = TraitName,  # Las columnas serán los valores de TraitName
-    values_from = Frequency, # Las celdas serán las frecuencias
-    values_fill = 0          # Rellenar con 0 para combinaciones sin ocurrencias
+    names_from = TraitName,  
+    values_from = Frequency, 
+    values_fill = 0          
   )
 
 ################################
@@ -169,17 +172,14 @@ FA_clean <- FA_merge %>%
 
 ########TEST CON 1 ESTUDIO (luego automatizar)
 #Filtrar por estudio
+unique(FA_clean$id_study)
 filter_id <- FA_clean %>%
-  filter(id_study == "CU_Aravena et al. 2002_1 1A Saplings random plots or quadrats") 
+  filter(id_study == "PR_Baeten et al. 2010_Baeten Belgium vegetation recovery") 
 
 #Filtrar por sp
+unique(filter_id$taxon_clean)
 filter_sp <- filter_id  %>%
-  filter(taxon_clean == "Weinmannia trichosperma") 
-
-#Ordenar age de menor a mayor
-is.numeric(filter_sp$age)
-filter_sp <- filter_sp %>%
-  arrange(age)
+  filter(taxon_clean == "Viola arvensis") 
 
 # Generar todas las combinaciones de edades para cada id_study y taxon_clean
 age_mix <- filter_sp %>%
@@ -189,13 +189,27 @@ age_mix <- filter_sp %>%
   unnest(cols = c(data)) %>%  
   rename(age_mix = data) %>% 
   mutate(age_n = map_dbl(age_mix, 1),  
-         age_m = map_dbl(age_mix, 2))  
+         age_m = map_dbl(age_mix, 2),
+         age_pair = paste(age_n, age_m, sep = "_"))  
+
+#dataframe de combinaciones de años que sirven
+age_unique <- unique(filter_sp$age) %>%
+  as.data.frame() %>%
+  arrange (.) %>%
+  rename("age" = ".")
+
+#vector de pares de años ordenados
+años<- paste(age_unique$age[-length(age_unique$age)], age_unique$age[-1], sep = "_")
+
+#filtrar dataframe age_mix por coincidencias
+age_mix_filt <- age_mix %>%
+  filter(age_pair %in% años)
 
 # Unir con las mediciones de cada combinación
-FA_comparisons <- age_mix %>%
-  left_join(filter_sp, by = c("id_study", "taxon_clean", "age_n" = "age")) %>%
+FA_comparisons <- age_mix_filt %>%
+  left_join(filter_sp, by = c("id_study", "taxon_clean", "age_n" = "age"),relationship = "many-to-many") %>%
   rename(measurement_n = measurement) %>%
-  left_join(filter_sp, by = c("id_study", "taxon_clean", "age_m" = "age")) %>%
+  left_join(filter_sp, by = c("id_study", "taxon_clean", "age_m" = "age"),relationship = "many-to-many") %>%
   rename(measurement_m = measurement) %>%
   mutate(
     comparacion = case_when(
@@ -206,7 +220,6 @@ FA_comparisons <- age_mix %>%
       measurement_n != 0 & measurement_m == 0 ~ "desaparece",     # Desaparece
       TRUE ~ NA_character_                                       # Caso por defecto
     ),
-    age_comparison = paste(age_n, age_m, sep = "_")               # Combinación de edades
   )
 
 #Contabilizar NC y C, calcular %
