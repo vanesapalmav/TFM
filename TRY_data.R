@@ -8,6 +8,7 @@ library(dplyr)
 library(purrr)
 library(tidyr)
 library(ggplot2)
+library(purrr)
 #https://cran.r-project.org/web/packages/rtry/vignettes/rtry-introduction.html
 
 #CARGAR DATOS
@@ -16,13 +17,13 @@ FA <- read.csv(file='/Users/vanepalmav/Documents/MS Ecología/TFM/DATOS/TFM/tax
                  header=TRUE, sep=';') 
 FA_taxon <- read.csv(file='/Users/vanepalmav/Documents/MS Ecología/TFM/DATOS/TFM/assemblages_temp_vanesa.csv',
                   header=TRUE, sep=';') 
-
+#TRY_disp <- read.csv()
 
 #Analizar por trait (ejemplo)
 # Filtrar el dataframe para TraitID igual a 28
-unique(TRY$TraitID)
-filtered_df <- TRY %>%
-  filter(TraitID == 4083) 
+#unique(TRY$TraitID)
+#filtered_df <- TRY %>%
+  #filter(TraitID == 4083) 
 #609 no sirve Plant propagation type
 #4083 pocos datos
 #3364 pocos datos
@@ -47,25 +48,14 @@ TRY_cuali_filt<- TRY_cuali %>%
   ungroup()
 
 #Filtrar por error >4
-TRY_filt <- TRYNF[TRYNF$AccSpeciesName %in% FA$taxon_clean, ]
-sum(TRY_filt$ErrorRisk > 4, na.rm = TRUE)
-
-#Para generos calcular media
-#Limpieza de subespecies
+TRY_filt<-TRY[TRY$ErrorRisk < 4, ]
 
 #Filtrar valores NA
-summary(TRYNF$StdValue) #NAs are traits that have cathegorical values (e "low")
-TRYNF <- TRYNF[!is.na(TRYNF$StdValue),]
-
-#Filtrar errores <4
-TRYNF<-TRYNF[TRYNF$ErrorRisk < 4, ]
-
-plot(TRYNF$StdValue)
-summary(TRYNF$ErrorRisk)
-plot(TRYNF$StdValue[TRYNF$ErrorRisk<4])
+summary(TRY$StdValue) #NAs are traits that have cathegorical values (e "low")
+TRY_filt <- TRY_filt[!is.na(TRY_filt$StdValue),]
 
 #Calculo valor medio, desv de StdValue y mean de ErrorRisk
-TRYNF_mean <- TRYNF %>%
+TRY_mean <- TRY_filt %>%
   group_by(AccSpeciesName, TraitName) %>%  
   summarise(
     n_registros = sum(!is.na(StdValue)),                   # Número de registros no NA en StdValue
@@ -76,11 +66,13 @@ TRYNF_mean <- TRYNF %>%
   ) %>%
   ungroup()
 
+length(unique(TRY_mean$AccSpeciesName))
+
 #Si sd es NA significa que hay solo 1 observacion
 
 # Cambiar nombres
 unique(TRYNF_mean$TraitName)
-TRYNF_mean <- TRYNF_mean %>%
+TRY_mean <- TRY_mean %>%
   mutate(TraitName = case_when(
     TraitName == "Stem specific density (SSD, stem dry mass per stem fresh volume) or wood density" ~ "Wood density",
     TraitName == "Seed germination rate (germination efficiency)" ~ "Seed germination rate",
@@ -92,19 +84,34 @@ TRYNF_mean <- TRYNF_mean %>%
   ))
 
 # Aplicar el logaritmo solo a las filas donde TraitName es "Seed dry mass"
-TRYNF_mean <- TRYNF_mean %>%
+TRY_mean <- TRY_mean %>%
   mutate(mean_StdValue = case_when(
     TraitName == "Seed dry mass" ~ log(mean_StdValue), # Aplicar log
     TRUE ~ mean_StdValue                                # Mantener los valores originales
   ))
 
 #data frame de especies
-sp <- unique(TRYNF_mean$AccSpeciesName) %>%
-  as.data.frame()
+sp <- unique(TRY_mean$AccSpeciesName) %>%
+  as.data.frame() %>%
+  rename ("SpeciesName"=".")
+
+#SOLO 1A LETRA MAYUSCULA
+# Definir la función 
+mayus_first <- function(text) {
+  tolower(text) %>% 
+    sub("^(.)", "\\U\\1", ., perl = TRUE)
+}
+
+# Aplicarlo a la columna AccSpeciesName
+sp <- sp %>% 
+  mutate(SpeciesName = mayus_first(SpeciesName))
+
+TRY_mean <- TRY_mean %>% 
+  mutate(AccSpeciesName = mayus_first(AccSpeciesName))
 
 #barplot de frecuencias de rasgos
 #trait_counts2
-trait_counts2 <- table(TRYNF_mean$TraitName)
+trait_counts2 <- table(TRY_mean$TraitName)
 
 # Crear el barplot sin etiquetas en el eje x
 bp <- barplot(trait_counts2, 
@@ -125,7 +132,7 @@ text(x = bp,
 
 #Summary e histograma de los valores de c/trait
 # Resumen por TraitID
-summary_by_trait <- TRYNF_mean %>%
+summary_by_trait <- TRY_mean %>%
   group_by(TraitName) %>%
   summarise(
     mean_of_means = mean(mean_StdValue, na.rm = TRUE),    # Media de las medias
@@ -134,30 +141,39 @@ summary_by_trait <- TRYNF_mean %>%
     max_mean = max(mean_StdValue, na.rm = TRUE),          # Máximo de las medias
     n_species = n()                                       # Número de especies
   )
-
 # Mostrar resumen
 print(summary_by_trait)
 
 #Eliminar rasgos con pocos datos
-TRYNF_mean <- TRYNF_mean %>%
+TRY_mean <- TRY_mean %>%
   filter(TraitName != "Specific leaf area") %>%
   filter(TraitName != "Photosynthetic rate per leaf area")
 
 # Histograma de mean_StdValue por TraitName
-ggplot(TRYNF_mean, aes(x = mean_StdValue)) +
-  geom_histogram(binwidth = 0.5, fill = "blue", color = "black") +  # Ajusta el binwidth según tus datos
-  facet_wrap(~ TraitName, scales = "free") +   # Un histograma separado por cada TraitID
+ggplot(TRY_mean, aes(x = mean_StdValue)) +
+  geom_histogram(binwidth = 0.5, fill = "blue", color = "black") +  
+  facet_wrap(~ TraitName, scales = "free") +   # Un histograma separado por cada TraitName
   labs(title = "Histograma de mean_StdValue por TraitID", x = "mean_StdValue", y = "Frecuencia") +
   theme_minimal()
 
 #Tabla de especies versus frecuencias de traitname
-trait_frequencies <- TRYNF_mean %>%
+#filtrar datos NA
+TRY_mean <- TRY_mean %>%
+  filter(!is.na(TraitName) & TraitName != "")
+
+trait_frequencies <- TRY_mean %>%
   count(AccSpeciesName, TraitName, name = "Frequency") %>%
   pivot_wider(
     names_from = TraitName,  
     values_from = Frequency, 
     values_fill = 0          
   )
+
+# Crear el data frame con los porcentajes promedio
+trait_perc <- trait_frequencies %>%
+  select(-AccSpeciesName) %>% 
+  summarise(across(everything(), ~ sum(.x) / nrow(trait_frequencies) * 100))  
+print(trait_perc)
 
 ################################
 
@@ -167,6 +183,10 @@ FA_merge<- merge(FA[, c("id_comm", "taxon_clean","measurement")], FA_taxon, by =
 # Mantener solo las columnas id_study, id_comm, taxon_clean, measurement y age
 FA_clean <- FA_merge %>%
   select(id_study,id_comm, taxon_clean, age, measurement)
+
+length(unique(FA_clean$taxon_clean))
+FA_clean <- FA_clean %>% 
+  mutate(taxon_clean = mayus_first(taxon_clean))
 
 #ANALISIS COLONIZACION (x aparicion)
 
@@ -222,36 +242,8 @@ FA_comparisons <- age_mix_filt %>%
     ),
   )
 
-#Contabilizar NC y C, calcular %
 #CODIGO PARA TODOS LOS ESTUDIOS Y SP
-
-# Función para análisis y comparación entre combinaciones de edades
-analisis_study_sp <- function(df) {
-  df <- df %>%
-    arrange(age) %>%
-    summarise(data = list(combn(age, 2, simplify = FALSE)), .groups = "drop") %>%
-    unnest(cols = c(data)) %>%  
-    rename(age_mix = data) %>%  
-    mutate(age_n = map_dbl(age_mix, 1),  
-           age_m = map_dbl(age_mix, 2))  
-  df <- df %>%
-    left_join(filter_sp, by = c("id_study", "taxon_clean", "age_n" = "age")) %>%
-    rename(measurement_n = measurement) %>%
-    left_join(filter_sp, by = c("id_study", "taxon_clean", "age_m" = "age")) %>%
-    rename(measurement_m = measurement) %>%
-    mutate(
-      comparacion = case_when(
-        age_n == age_m ~ NA_character_,  # Si las edades son iguales, comparacion es NA
-        measurement_n != 0 & measurement_m != 0 ~ "permanece",       # Permanece
-        measurement_n == 0 & measurement_m == 0 ~ "no aparece",     # No aparece
-        measurement_n == 0 & measurement_m != 0 ~ "aparece",        # Aparece
-        measurement_n != 0 & measurement_m == 0 ~ "desaparece",     # Desaparece
-        TRUE ~ NA_character_                                       # Caso por defecto
-      ),
-      age_comparison = paste(age_n, age_m, sep = "_")             
-    )
-  return(df)
-}
+    #FA_result<-
 
 # Agrupar por id_study y taxon_clean, luego aplicar la función para cada combinación
 FA_result <-
@@ -267,7 +259,7 @@ str(FA_result)
 #UNIR FA_result CON TRYNF
 TRY_FA_result <- FA_result %>%
   inner_join(
-    TRYNF_mean %>%
+    TRY_mean %>%
       filter(AccSpeciesName %in% FA_result$taxon_clean & !is.na(TraitName)) %>%
       select(AccSpeciesName, TraitName, mean_StdValue, sd_StdValue, mean_ErrorRisk, sd_ErrorRisk),
     by = c("taxon_clean" = "AccSpeciesName"),
