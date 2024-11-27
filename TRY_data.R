@@ -17,7 +17,7 @@ FA <- read.csv(file='/Users/vanepalmav/Documents/MS Ecología/TFM/DATOS/TFM/tax
                  header=TRUE, sep=';') 
 FA_taxon <- read.csv(file='/Users/vanepalmav/Documents/MS Ecología/TFM/DATOS/TFM/assemblages_temp_vanesa.csv',
                   header=TRUE, sep=';') 
-#TRY_disp <- read.csv()
+TRY_disp <- read.csv('/Users/vanepalmav/Documents/MS Ecología/TFM/DATOS/TFM/TRY_dispersion.csv')
 
 #Analizar por trait (ejemplo)
 # Filtrar el dataframe para TraitID igual a 28
@@ -34,18 +34,9 @@ FA_taxon <- read.csv(file='/Users/vanepalmav/Documents/MS Ecología/TFM/DATOS/T
 TRYNF <- TRY[TRY$AccSpeciesName %in% FA$taxon_clean & !is.na(TRY$TraitID),
              c("AccSpeciesName","TraitID","TraitName","DataName", "StdValue","ErrorRisk")]
 
-#Solo con el 28 y 357
-TRY_cuali <- TRYNF %>%
-  filter(TraitID %in% c(28, 357))
-
-# Mantener solo el AccSpeciesName con el DataName más frecuente y su frecuencia
-TRY_cuali_filt<- TRY_cuali %>%
-  group_by(AccSpeciesName) %>%
-  summarise(
-    most_frequent_DataName = names(which.max(table(DataName))), # Obtener el DataName más frecuente
-    frequency = max(table(DataName))                           # Frecuencia del DataName más frecuente
-  ) %>%
-  ungroup()
+#TRY disp
+length(unique(TRY_disp$taxon_original))
+#Limpieza de taxones, quedarme solo con 2 primeras palabras
 
 #Filtrar por error >4
 TRY_filt<-TRY[TRY$ErrorRisk < 4, ]
@@ -173,11 +164,17 @@ trait_frequencies <- TRY_mean %>%
 trait_perc <- trait_frequencies %>%
   select(-AccSpeciesName) %>% 
   summarise(across(everything(), ~ sum(.x) / nrow(trait_frequencies) * 100))  
-print(trait_perc)
 
 ################################
 
-#MERGE FA Y FA2
+#MERGE FA Y FA_taxon
+#Filtrar FA, eliminar no rank
+table(FA$rank)
+FA <- FA %>% 
+  filter(rank != "no rank")
+
+#Para subespecies quedarme solo con 2 primeras palabras
+
 FA_merge<- merge(FA[, c("id_comm", "taxon_clean","measurement")], FA_taxon, by = "id_comm", all.x = TRUE)
 
 # Mantener solo las columnas id_study, id_comm, taxon_clean, measurement y age
@@ -187,6 +184,7 @@ FA_clean <- FA_merge %>%
 length(unique(FA_clean$taxon_clean))
 FA_clean <- FA_clean %>% 
   mutate(taxon_clean = mayus_first(taxon_clean))
+
 
 #ANALISIS COLONIZACION (x aparicion)
 
@@ -210,7 +208,8 @@ age_mix <- filter_sp %>%
   rename(age_mix = data) %>% 
   mutate(age_n = map_dbl(age_mix, 1),  
          age_m = map_dbl(age_mix, 2),
-         age_pair = paste(age_n, age_m, sep = "_"))  
+         age_pair = paste(age_n, age_m, sep = "_"),
+         age_diff = abs(age_n - age_m))  
 
 #dataframe de combinaciones de años que sirven
 age_unique <- unique(filter_sp$age) %>%
@@ -238,7 +237,7 @@ FA_comparisons <- age_mix_filt %>%
       measurement_n == 0 & measurement_m == 0 ~ "no aparece",     # No aparece
       measurement_n == 0 & measurement_m != 0 ~ "aparece",        # Aparece
       measurement_n != 0 & measurement_m == 0 ~ "desaparece",     # Desaparece
-      TRUE ~ NA_character_                                       # Caso por defecto
+      TRUE ~ NA_character_                                       
     ),
   )
 
@@ -256,20 +255,32 @@ FA_result <-
 str(FA_result)
 
 ###################
-#UNIR FA_result CON TRYNF
-TRY_FA_result <- FA_result %>%
+#UNIR FA_coloniza CON TRYNF
+TRY_FA_result <- FA_clean %>%
   inner_join(
     TRY_mean %>%
-      filter(AccSpeciesName %in% FA_result$taxon_clean & !is.na(TraitName)) %>%
+      filter(AccSpeciesName %in% FA_clean$taxon_clean & !is.na(TraitName)) %>%
       select(AccSpeciesName, TraitName, mean_StdValue, sd_StdValue, mean_ErrorRisk, sd_ErrorRisk),
     by = c("taxon_clean" = "AccSpeciesName"),
     relationship = "many-to-many"
   )
 
+trait_frequencies2 <- TRY_FA_result %>%
+  count(taxon_clean, TraitName, name = "Frequency") %>%
+  pivot_wider(
+    names_from = TraitName,  
+    values_from = Frequency, 
+    values_fill = 0          
+  )
+
+trait_accum <- trait_frequencies2 %>%
+  select(-taxon_clean) %>% 
+  summarise(across(everything(), ~ sum(.x != 0)))
+
 #UNIR FA_result CON TRY_cuali
-TRY_FA_cuali <- FA_result %>%
+TRY_FA_disp <- FA_result %>%
   inner_join(
-    TRY_cuali_filt %>%
+    TRY_disp %>%
       filter(AccSpeciesName %in% FA_result$taxon_clean & !is.na(TraitName)) %>%
       select(AccSpeciesName, TraitName, mean_StdValue, sd_StdValue, mean_ErrorRisk, sd_ErrorRisk),
     by = c("taxon_clean" = "AccSpeciesName"),
@@ -278,10 +289,9 @@ TRY_FA_cuali <- FA_result %>%
 
 #test 1 estudio
 #study1 <- filter
-
 #boxplot
 study1 <- TRY_FA_result %>%
-  filter(id_study == "Nombre_del_Estudio_Especifico")
+  filter(id_study == "Nombre_Estudio")
 
 study1 <- study1 %>%
   mutate(TraitName = gsub(" ", "\n", TraitName))  # Reemplaza espacios por saltos de línea
