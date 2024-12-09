@@ -9,6 +9,7 @@ library(purrr)
 library(tidyr)
 library(ggplot2)
 library(purrr)
+library(rgbif)
 #https://cran.r-project.org/web/packages/rtry/vignettes/rtry-introduction.html
 
 #CARGAR DATOS
@@ -30,21 +31,68 @@ TRY_disp <- read.csv('/Users/vanepalmav/Documents/MS Ecología/TFM/DATOS/TFM/TR
 #28 Sindrome de dispersion
 #357 Plant vegetation reproduction
 
+# Eliminar filas donde TraitID sea 4083 (SLA),28,
+TRY <- TRY %>%
+  filter(TraitID != 4083,
+         TraitID != 28,
+         TraitID != 609,
+         TraitID != 357)
+
 #Seleccionar solo ciertas columnas de FA solo cuando coinciden especies de TRY y FA
 TRYNF <- TRY[TRY$AccSpeciesName %in% FA$taxon_clean & !is.na(TRY$TraitID),
              c("AccSpeciesName","TraitID","TraitName","DataName", "StdValue","ErrorRisk")]
 
-#TRY disp
-length(unique(TRY_disp$taxon_original))
-#Limpieza de taxones, quedarme solo con 2 primeras palabras
+###LIMPIEZA DE NOMBRE DE ACCSPECIESNAME
+#Para TRY_disp en caso de que NA en gbifspecies repetir taxon_original
+TRY_disp <- TRY_disp %>%
+  mutate(gbif_species = ifelse(is.na(gbif_species) | gbif_species == "NA NA", 
+                               taxon_original, gbif_species))
 
-#Filtrar por error >4
-TRY_filt<-TRY[TRY$ErrorRisk < 4, ]
+#Solo especies no subespecies
+TRYNF <- TRYNF %>%
+  mutate(AccSpeciesName = sapply(strsplit(AccSpeciesName, " "), 
+                                 function(x) paste(x[1:2], collapse = " ")))
+
+TRY_disp <- TRY_disp %>%
+  mutate(gbif_species = sapply(strsplit(gbif_species, " "),
+                               function(x) paste(x[1:2], collapse = " ")))
+
+#Solo 1a letra mayuscula
+# Definir la función 
+mayus_first <- function(text) {
+  tolower(text) %>% 
+    sub("^(.)", "\\U\\1", ., perl = TRUE)
+}
+
+# Aplicarlo a la columna AccSpeciesName
+TRYNF <- TRYNF %>% 
+  mutate(AccSpeciesName = mayus_first(AccSpeciesName))
+
+#Filtrar por error < 4
+TRY_filt<-TRYNF[TRYNF$ErrorRisk < 4, ]
 
 #Filtrar valores NA
-summary(TRY$StdValue) #NAs are traits that have cathegorical values (e "low")
+summary(TRYNF$StdValue) #NAs son valores categoricos que pueden haber quedado
 TRY_filt <- TRY_filt[!is.na(TRY_filt$StdValue),]
 
+####MODA DE DATOS DE TRY_DISP
+###Datos repetidos para TRY_disp
+# Función para calcular la moda
+get_mode <- function(x) {
+  ux <- unique(x)  
+  tab <- tabulate(match(x, ux))  
+  ux[tab == max(tab)] 
+}
+
+# Aplicar la moda por especie (gbif_species)
+TRY_disp_mode <- TRY_disp %>%
+  group_by(gbif_species) %>%  
+  summarise(
+    mode_trait_value = list(get_mode(trait_value)),  
+    .groups = "drop"
+  )
+
+###MEDIDAS DE TENDENCIA Y DISPERSION
 #Calculo valor medio, desv de StdValue y mean de ErrorRisk
 TRY_mean <- TRY_filt %>%
   group_by(AccSpeciesName, TraitName) %>%  
@@ -58,8 +106,18 @@ TRY_mean <- TRY_filt %>%
   ungroup()
 
 length(unique(TRY_mean$AccSpeciesName))
-
 #Si sd es NA significa que hay solo 1 observacion
+
+#Media por familias y generos
+TRY_mean <- TRY_mean %>%
+  mutate(
+    gbif_data = map(AccSpeciesName, ~ tryCatch(
+      name_backbone(name = .x), error = function(e) NULL
+    )),
+    familia = map_chr(gbif_data, ~ .x$family %||% NA_character_),
+    genero = map_chr(gbif_data, ~ .x$genus %||% NA_character_)
+  ) %>%
+  select(-gbif_data) 
 
 # Cambiar nombres
 unique(TRYNF_mean$TraitName)
@@ -67,18 +125,19 @@ TRY_mean <- TRY_mean %>%
   mutate(TraitName = case_when(
     TraitName == "Stem specific density (SSD, stem dry mass per stem fresh volume) or wood density" ~ "Wood density",
     TraitName == "Seed germination rate (germination efficiency)" ~ "Seed germination rate",
-    TraitName == "Plant growth rate relative (plant relative growth rate, RGR)" ~ "Plant growth rate",
     TraitName == "Plant biomass and allometry: Seed number per plant" ~ "Seed number per plant",
     TraitName == "Leaf area per leaf dry mass (specific leaf area, SLA or 1/LMA) of total leaf area" ~ "Specific leaf area",
     TraitName == "Photosynthesis A/Ci curve: photosynthetic rate per leaf area" ~ "Photosynthetic rate per leaf area",
     TRUE ~ TraitName
   ))
 
-# Aplicar el logaritmo solo a las filas donde TraitName es "Seed dry mass"
+# Aplicar el logaritmo y logit
 TRY_mean <- TRY_mean %>%
   mutate(mean_StdValue = case_when(
-    TraitName == "Seed dry mass" ~ log(mean_StdValue), # Aplicar log
-    TRUE ~ mean_StdValue                                # Mantener los valores originales
+    TraitName == "Seed dry mass" ~ log(mean_StdValue), 
+    TraitName == "Seed number per plant" ~ log(mean_StdValue),
+    TraitName == "Seed germination rate" ~ qlogis(mean_StdValue),
+    TRUE ~ mean_StdValue                                
   ))
 
 #data frame de especies
@@ -86,22 +145,7 @@ sp <- unique(TRY_mean$AccSpeciesName) %>%
   as.data.frame() %>%
   rename ("SpeciesName"=".")
 
-#SOLO 1A LETRA MAYUSCULA
-# Definir la función 
-mayus_first <- function(text) {
-  tolower(text) %>% 
-    sub("^(.)", "\\U\\1", ., perl = TRUE)
-}
-
-# Aplicarlo a la columna AccSpeciesName
-sp <- sp %>% 
-  mutate(SpeciesName = mayus_first(SpeciesName))
-
-TRY_mean <- TRY_mean %>% 
-  mutate(AccSpeciesName = mayus_first(AccSpeciesName))
-
 #barplot de frecuencias de rasgos
-#trait_counts2
 trait_counts2 <- table(TRY_mean$TraitName)
 
 # Crear el barplot sin etiquetas en el eje x
@@ -126,19 +170,14 @@ text(x = bp,
 summary_by_trait <- TRY_mean %>%
   group_by(TraitName) %>%
   summarise(
-    mean_of_means = mean(mean_StdValue, na.rm = TRUE),    # Media de las medias
-    sd_of_means = sd(mean_StdValue, na.rm = TRUE),        # Desviación estándar de las medias
-    min_mean = min(mean_StdValue, na.rm = TRUE),          # Mínimo de las medias
-    max_mean = max(mean_StdValue, na.rm = TRUE),          # Máximo de las medias
-    n_species = n()                                       # Número de especies
+    mean_of_means = mean(mean_StdValue, na.rm = TRUE),    
+    sd_of_means = sd(mean_StdValue, na.rm = TRUE),        
+    min_mean = min(mean_StdValue, na.rm = TRUE),          
+    max_mean = max(mean_StdValue, na.rm = TRUE),          
+    n_species = n()                                       
   )
 # Mostrar resumen
 print(summary_by_trait)
-
-#Eliminar rasgos con pocos datos
-TRY_mean <- TRY_mean %>%
-  filter(TraitName != "Specific leaf area") %>%
-  filter(TraitName != "Photosynthetic rate per leaf area")
 
 # Histograma de mean_StdValue por TraitName
 ggplot(TRY_mean, aes(x = mean_StdValue)) +
@@ -324,21 +363,11 @@ ggplot(TRYNF, aes(x = comparación, y = DataName)) +
   ) +
   theme_minimal()
 
-#install.packages("devtools")
-#devtools::install_github("bmaitner/RBIEN")
-#https://github.com/bmaitner/RBIEN/blob/master/tutorials/RBIEN_tutorial.Rmd
-#https://besjournals.onlinelibrary.wiley.com/doi/full/10.1111/2041-210X.12861
-#library(BIEN)
-#library(ape)
-
-#?BIEN
-#BIEN<-BIEN_trait_list()
-
-##############################
-#Landcover
+##############################ANALISIS ESPACIAL
 library(terra)
 library(sf)
 
+#Landcover
 LC_class1 <- rast("/Users/vanepalmav/Documents/MS Ecología/TFM/DATOS/LANDCOVER/Consensus_reduced_class_1.tif")
 LC_class2 <- rast("/Users/vanepalmav/Documents/MS Ecología/TFM/DATOS/LANDCOVER/Consensus_reduced_class_2.tif")
 LC_class3 <- rast("/Users/vanepalmav/Documents/MS Ecología/TFM/DATOS/LANDCOVER/Consensus_reduced_class_3.tif")
@@ -354,7 +383,6 @@ LC_class3mw <- project(LC_class3, mollweide_crs)
 
 #Suma de raster para que todos esten en uno
 LC <- LC_class1mw+LC_class2mw+LC_class3mw
-
 plot(LC)
 LC
 
@@ -383,18 +411,26 @@ puntos_sf <- st_as_sf(puntos_mw)
 # Crear un buffer de 10 km alrededor de cada punto
 buffer_10km <- st_buffer(puntos_sf, dist = 10000)  # Distancia en metros
 
-# Convertir el raster a polígonos
-lC_polygon <- as.polygons(LC)
-
-# Interseccion del buffer con el raster convertido a polígono
-polygon_intersect <- st_intersection(buffer_10km, st_as_sf(lC_polygon))
-
-# Visualizar los polígonos resultantes
-plot(st_geometry(polygon_intersect), main = "Polígonos Intersectados")
-plot(st_geometry(buffer_10km), add = TRUE, border = 'red', lwd = 2)  # Opcional: mostrar el buffer
+# Cortar el raster segun los polígono buffer
+# Convertir el buffer (sf) a un objeto compatible con terra
+buffer_10km_v <- vect(buffer_10km)
+# Recortar el raster al área del buffer
+LC_cortado <- crop(LC, buffer_10km_v)
+# Mascara para mantener solo los valores dentro del buffer
+LC_cortado <- mask(LC_cortado, buffer_10km_v)
 
 # Guardar el resultado en un archivo
-st_write(polygon_intersect, "ruta/al/resultado_poligonos_intersectados.shp")
+writeRaster(LC_cortado, "LC_buffer.tif", overwrite = TRUE)
+
+# Convertir raster a polígonos
+LC_poligonos <- as.polygons(LC_cortado, dissolve = TRUE)
+# Convertir a objeto sf si es necesario
+LC_poligonos_sf <- st_as_sf(LC_poligonos)
+
+plot(LC_poligonos_sf["value"])  
+
+# Guardar el resultado en un archivo
+st_write(LC_poligonos_sf, "LC_poligonos.geojson", delete_dsn = TRUE)
 
 #Calcular metricas
 #install.packages("landscapemetrics")
