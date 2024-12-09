@@ -14,6 +14,8 @@ library(rgbif)
 
 #CARGAR DATOS
 TRY <- rtry_import("~/Documents/MS Ecología/TFM/DATOS/TFM/36144.txt")
+TRY_2 <- rtry_import("~/Documents/MS Ecología/TFM/DATOS/TFM/37762.txt")
+#1,3115,3116,3117,587,42
 FA <- read.csv(file='/Users/vanepalmav/Documents/MS Ecología/TFM/DATOS/TFM/taxon_temp_vanesa.csv',
                  header=TRUE, sep=';') 
 FA_taxon <- read.csv(file='/Users/vanepalmav/Documents/MS Ecología/TFM/DATOS/TFM/assemblages_temp_vanesa.csv',
@@ -417,6 +419,7 @@ buffer_10km <- st_buffer(puntos_sf, dist = 10000)  # Distancia en metros
 
 ######CALCULO METRICAS
 library(landscapemetrics)
+#https://cran.r-project.org/web/packages/landscapemetrics/index.html
 #https://r-spatialecology.github.io/landscapemetrics/
 
 # Lista para almacenar resultados de las métricas de paisaje
