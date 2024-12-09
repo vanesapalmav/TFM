@@ -386,6 +386,13 @@ LC <- LC_class1mw+LC_class2mw+LC_class3mw
 plot(LC)
 LC
 
+#Filtrar valores, conservar solo >60% cobertura
+LC_filtrado <- classify(LC, rcl = matrix(c(-Inf, 60, NA), ncol = 3, byrow = TRUE))
+#LC binario (1=bosque)
+LC_mayores_60 <- classify(LC, rcl = matrix(c(-Inf, 60, NA, 60, Inf, 1), ncol = 3, byrow = TRUE))
+
+#writeRaster(LC_mayores_60, "LC_bin.tif", overwrite = TRUE)
+
 #Extraer dataframe de coordenadas por id_comm
 coords <- FA_taxon |>
   group_by(id_comm) |>
@@ -395,46 +402,91 @@ coords <- FA_taxon |>
 
 #Conteo coordenadas distintas
 coords$union <- paste(coords$lon, coords$lat, sep = "_")
-obs <- unique(coords$union)
-length(obs) #198 de 354 coordenadas
+length(unique(coords$union))
+#198 de 354 coordenadas
 
 #Convertir a Spatialpoints
 puntos <- vect(coords, geom = c("lon", "lat"), crs = "EPSG:4326")
-
 #Reproyectar 
 puntos_mw <- project(puntos, mollweide_crs)
-
-#Interseccion de puntos y raster, para extraer poligonos en el buffer de 10km
-# Convertir los puntos a un objeto sf 
+#Interseccion de puntos y raster para extraer poligonos en el buffer de 10km
+# Convertir los puntos a sf 
 puntos_sf <- st_as_sf(puntos_mw)
-
 # Crear un buffer de 10 km alrededor de cada punto
 buffer_10km <- st_buffer(puntos_sf, dist = 10000)  # Distancia en metros
 
-# Cortar el raster segun los polígono buffer
-# Convertir el buffer (sf) a un objeto compatible con terra
-buffer_10km_v <- vect(buffer_10km)
-# Recortar el raster al área del buffer
-LC_cortado <- crop(LC, buffer_10km_v)
-# Mascara para mantener solo los valores dentro del buffer
-LC_cortado <- mask(LC_cortado, buffer_10km_v)
-
-# Guardar el resultado en un archivo
-writeRaster(LC_cortado, "LC_buffer.tif", overwrite = TRUE)
-
-# Convertir raster a polígonos
-LC_poligonos <- as.polygons(LC_cortado, dissolve = TRUE)
-# Convertir a objeto sf si es necesario
-LC_poligonos_sf <- st_as_sf(LC_poligonos)
-
-plot(LC_poligonos_sf["value"])  
-
-# Guardar el resultado en un archivo
-st_write(LC_poligonos_sf, "LC_poligonos.geojson", delete_dsn = TRUE)
-
-#Calcular metricas
-#install.packages("landscapemetrics")
+######CALCULO METRICAS
 library(landscapemetrics)
+#https://r-spatialecology.github.io/landscapemetrics/
+
+# Lista para almacenar resultados de las métricas de paisaje
+resultados_metrica <- list()
+
+# Iterar sobre cada buffer
+for (i in 1:nrow(buffer_10km)) {
+  # Extraer el buffer actual
+  buffer_actual <- buffer_10km[i, ]
+  # Recortar y enmascarar el raster según el buffer actual
+  LC_buffer <- crop(LC_mayores_60, vect(buffer_actual))
+  LC_buffer <- mask(LC_buffer, vect(buffer_actual))
+  # Verificar si hay suficiente cobertura forestal para calcular métricas
+  if (all(is.na(values(LC_buffer)))) {
+    next  # Saltar al siguiente buffer si el raster está vacío
+  }
+  # Convertir el raster
+  LC_raster <- as(LC_buffer, "SpatRaster")
+  # Calcular las métricas de paisaje a nivel de clase
+  metrica_area <- lsm_c_area_mn(landscape = LC_raster) %>%
+    rename(area_mn = value)
+  metrica_enn <- lsm_c_enn_mn(landscape = LC_raster) %>%
+    rename(enn_mn = value)
+  metrica_shape <- lsm_c_shape_mn(landscape = LC_raster) %>%
+    rename(shape_mn = value)
+  # Combinar todas las métricas en un único data frame
+  metrica_total <- full_join(metrica_cpland, metrica_area, by = "class") %>%
+    full_join(metrica_enn, by = "class") %>%
+    full_join(metrica_shape, by = "class")
+  # Agregar id del buffer y columna `id_comm`
+  metrica_total <- metrica_total %>%
+    mutate(buffer_id = i,
+           id_comm = buffer_actual$id_comm)
+  # Almacenar en list
+  resultados_metrica[[i]] <- metrica_total
+}
+
+# Combinar resultados en un único data frame
+resultados_df <- bind_rows(resultados_metrica)
+print(areas_clases_por_buffer)
+
+#% DE COBERTURA POR BUFFER
+resultados_cpland <- list()
+
+for (i in 1:nrow(buffer_10km)) {
+  buffer_actual <- buffer_10km[i, ]
+  LC_filtrado_buffer <- crop(LC_filtrado, vect(buffer_actual))
+  LC_filtrado_buffer <- mask(LC_filtrado_buffer, vect(buffer_actual))
+  if (all(is.na(values(LC_filtrado_buffer)))) {
+    next  
+  }
+  # Calcular el área total del buffer en m2
+  area_buffer <- as.numeric(st_area(buffer_actual))
+  # Calcular CPLAND
+  celdas_valores <- values(LC_filtrado_buffer)
+  celdas_area <- prod(res(LC_filtrado))  # Area  c/pixel en m2
+  promedio_ponderado <- mean(celdas_valores, na.rm = TRUE)  # Promedio 
+  # Convertir a % respecto al buffer completo
+  cpland_global <- (promedio_ponderado / 100) * 100  
+  # Guardar CPLAND y el id del buffer
+  resultados_cpland[[i]] <- data.frame(
+    buffer_id = i,
+    id_comm = buffer_actual$id_comm,
+    cpland_global = cpland_global
+  )
+}
+
+# Combinar los resultados de CPLAND
+cpland_df <- bind_rows(resultados_cpland)
+
 
 
 
