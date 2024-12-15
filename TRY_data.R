@@ -22,6 +22,9 @@ FA_taxon <- read.csv(file='/Users/vanepalmav/Documents/MS Ecología/TFM/DATOS/T
                   header=TRUE, sep=';') 
 TRY_disp <- read.csv('/Users/vanepalmav/Documents/MS Ecología/TFM/DATOS/TFM/TRY_dispersion.csv')
 
+#Unir dos df de TRY
+TRY <- rbind(TRY, TRY_2)
+
 #Analizar por trait (ejemplo)
 # Filtrar el dataframe para TraitID igual a 28
 #unique(TRY$TraitID)
@@ -87,6 +90,7 @@ get_mode <- function(x) {
 }
 
 # Aplicar la moda por especie (gbif_species)
+#categoria mixta cuando solo 2 values para 1 sp?
 TRY_disp_mode <- TRY_disp %>%
   group_by(gbif_species) %>%  
   summarise(
@@ -111,7 +115,8 @@ length(unique(TRY_mean$AccSpeciesName))
 #Si sd es NA significa que hay solo 1 observacion
 
 #Media por familias y generos
-TRY_mean <- TRY_mean %>%
+#Extraer familias y generos con rgbif
+TRY_filt <- TRY_filt %>%
   mutate(
     gbif_data = map(AccSpeciesName, ~ tryCatch(
       name_backbone(name = .x), error = function(e) NULL
@@ -120,6 +125,31 @@ TRY_mean <- TRY_mean %>%
     genero = map_chr(gbif_data, ~ .x$genus %||% NA_character_)
   ) %>%
   select(-gbif_data) 
+
+#Media por familia y genero
+# Agrupación a nivel de familia
+TRY_por_familia <- TRY_filt %>%
+  group_by(familia) %>%  
+  summarise(
+    n_registros = sum(!is.na(StdValue)),                   # Número de registros no NA en StdValue
+    mean_StdValue = mean(StdValue, na.rm = TRUE),          # Promedio de StdValue
+    sd_StdValue = sd(StdValue, na.rm = TRUE),              # Desviación estándar de StdValue
+    mean_ErrorRisk = mean(ErrorRisk, na.rm = TRUE),        # Promedio de ErrorRisk
+    sd_ErrorRisk = sd(ErrorRisk, na.rm = TRUE)             # Desviación estándar de ErrorRisk
+  ) %>%
+  ungroup()
+
+# Agrupación a nivel de género
+TRY_por_genero <- TRY_filt %>%
+  group_by(familia, genero) %>%  
+  summarise(
+    n_registros = sum(!is.na(StdValue)),                   # Número de registros no NA en StdValue
+    mean_StdValue = mean(StdValue, na.rm = TRUE),          # Promedio de StdValue
+    sd_StdValue = sd(StdValue, na.rm = TRUE),              # Desviación estándar de StdValue
+    mean_ErrorRisk = mean(ErrorRisk, na.rm = TRUE),        # Promedio de ErrorRisk
+    sd_ErrorRisk = sd(ErrorRisk, na.rm = TRUE)             # Desviación estándar de ErrorRisk
+  ) %>%
+  ungroup()
 
 # Cambiar nombres
 unique(TRYNF_mean$TraitName)
