@@ -248,14 +248,12 @@ FA <- FA %>%
 
 FA_merge<- merge(FA[, c("id_comm", "taxon_clean","measurement")], FA_taxon, by = "id_comm", all.x = TRUE)
 
-# Mantener solo las columnas id_study, id_comm, taxon_clean, measurement y age
+# Mantener solo las columnas id_study, id_comm, taxon_clean, measurement,abund y age
 FA_clean <- FA_merge %>%
-  select(id_study,id_comm, taxon_clean, age, measurement)
+  select(id_study,id_comm, taxon_clean, age, measurement,abund)
 
-length(unique(FA_clean$taxon_clean))
 FA_clean <- FA_clean %>% 
   mutate(taxon_clean = mayus_first(taxon_clean))
-
 
 #ANALISIS COLONIZACION (x aparicion)
 
@@ -313,21 +311,62 @@ FA_comparisons <- age_mix_filt %>%
   )
 
 #CODIGO PARA TODOS LOS ESTUDIOS Y SP
-    #FA_result<-
+#FA_clean <- FA_clean %>%
+  #filter(!is.na(id_study), !is.na(taxon_clean))  # Eliminar filas con NA en columnas clave
 
-# Agrupar por id_study y taxon_clean, luego aplicar la función para cada combinación
-FA_result <-
-  FA_clean %>%
-  group_by(id_study, taxon_clean) %>%  # Agrupar por id_study y taxon_clean
-  nest() %>%  # Anidar los datos por grupo
-  ungroup() %>%  # Desagrupar después de hacer el `nest()`
-  ###############ERROR SOS
+# Paso 1: Agrupar por id_study y taxon_clean
+age_mix <- FA_clean %>%
+  group_by(id_study, taxon_clean) %>%
+  arrange(age) %>%  # Asegurarse de que las edades estén ordenadas dentro de cada grupo
+  summarise(data = list(combn(unique(age), 2, simplify = FALSE)), .groups = "drop") %>%
+  unnest(cols = c(data)) %>%
+  rename(age_mix = data) %>%
+  mutate(age_n = map_dbl(age_mix, 1),  # Primer año del par
+         age_m = map_dbl(age_mix, 2),  # Segundo año del par
+         age_pair = paste(age_n, age_m, sep = "_"),  # Crear el par de edades
+         age_diff = abs(age_n - age_m))  # Diferencia de años
 
-str(FA_result)
+# Paso 2: Generar el vector de pares de años (en base a las edades únicas) para cada grupo
+age_unique <- FA_clean %>%
+  group_by(id_study, taxon_clean) %>%
+  summarise(age = unique(age), .groups = "drop") %>%
+  arrange(id_study, taxon_clean, age) %>%
+  ungroup()
+
+# Crear el vector de pares de años solo para cada grupo de id_study (sin repetir para todas las especies)
+años <- age_unique %>%
+  group_by(id_study) %>%
+  summarise(age_pairs = list(paste(age[-length(age)], age[-1], sep = "_")), .groups = "drop") %>%
+  unnest(cols = c(age_pairs))
+
+# Paso 3: Filtrar el dataframe `age_mix` por los pares de años
+age_mix_filt <- age_mix %>%
+  filter(age_pair %in% años$age_pairs)
+
+# Paso 4: Crear el dataframe `FA_comparisons2` con las mediciones para cada par de años
+FA_comparisons2 <- age_mix_filt %>%
+  left_join(FA_clean, by = c("id_study", "taxon_clean", "age_n" = "age"),relationship = "many-to-many") %>%
+  rename(measurement_n = measurement) %>%
+  left_join(FA_clean, by = c("id_study", "taxon_clean", "age_m" = "age"),relationship = "many-to-many") %>%
+  rename(measurement_m = measurement) %>%
+  mutate(
+    comparacion = case_when(
+      age_n == age_m ~ NA_character_,  # Si las edades son iguales, comparacion es NA
+      measurement_n != 0 & measurement_m != 0 ~ "permanece",       # Permanece
+      measurement_n == 0 & measurement_m == 0 ~ "no aparece",     # No aparece
+      measurement_n == 0 & measurement_m != 0 ~ "aparece",        # Aparece
+      measurement_n != 0 & measurement_m == 0 ~ "desaparece",     # Desaparece
+      TRUE ~ NA_character_                                       
+    ),
+  )
+
+# Paso 5: Filtrar `FA_comparisons2` con los pares de años válidos
+FA_comparisons2_filtered <- FA_comparisons2 %>%
+  filter(age_pair %in% años$age_pairs)
 
 ###################
-#UNIR FA_coloniza CON TRYNF
-TRY_FA_result <- FA_clean %>%
+#UNIR FA_comparisons2_filt  CON TRY_mean
+TRY_FA_result <- FA_comparisons2_filtered %>%
   inner_join(
     TRY_mean %>%
       filter(AccSpeciesName %in% FA_clean$taxon_clean & !is.na(TraitName)) %>%
@@ -335,6 +374,32 @@ TRY_FA_result <- FA_clean %>%
     by = c("taxon_clean" = "AccSpeciesName"),
     relationship = "many-to-many"
   )
+
+#TRY_FA_result2 <- TRY_FA_result  %>%
+  #filter(id_study == "CU_Aravena et al. 2002_1 1A Saplings random plots or quadrats",
+         #TraitName=="Seed dry mass")
+
+# Separar las edades en columnas para ordenar correctamente
+#TRY_FA_result2 <- TRY_FA_result2 %>%
+  #separate(age_pair, into = c("age_start", "age_end"), sep = "_", convert = TRUE) %>%
+  #mutate(
+    #age_pair = factor(paste(age_start, age_end, sep = "_"), levels = unique(paste(age_start, age_end, sep = "_")[order(age_start, age_end)]))
+  #)
+
+# Crear el boxplot con agrupación por age_pair y colores para comparacion
+#ggplot(TRY_FA_result2 , aes(x = age_pair, y = mean_StdValue, fill = comparacion)) +
+  #geom_boxplot(position = position_dodge(width = 0.75),alpha=0.7) +  
+  #scale_fill_brewer(palette = "Set1", name = "Comparación") +  
+  #labs(
+    #title = "",
+    #x = "Edad",
+    #y = "Log(peso semilla)"
+  #) +
+  #theme_minimal() +
+  #theme(
+    #axis.text.x = element_text(angle = 45, hjust = 1),  
+    #legend.position = "bottom"  
+  #)
 
 trait_frequencies2 <- TRY_FA_result %>%
   count(taxon_clean, TraitName, name = "Frequency") %>%
@@ -358,30 +423,7 @@ TRY_FA_disp <- FA_result %>%
     relationship = "many-to-many"
   )
 
-#test 1 estudio
-#study1 <- filter
-#boxplot
-study1 <- TRY_FA_result %>%
-  filter(id_study == "Nombre_Estudio")
-
-study1 <- study1 %>%
-  mutate(TraitName = gsub(" ", "\n", TraitName))  # Reemplaza espacios por saltos de línea
-
-ggplot(study1, aes(x = comparacion, y = mean_StdValue)) +
-  geom_boxplot() +
-  facet_grid(TraitName ~ age, scales = "free") +  # Facetas por 'TraitName' y 'age'
-  labs(x = "Comparación", 
-       y = "Mean StdValue", 
-       title = "Boxplot de Comparación vs. Mean StdValue, separado por age y TraitName") +
-  theme_minimal() +
-  theme(
-    axis.text.x = element_text(angle = 90, vjust = 0.5, hjust = 1),  # Textos verticales
-    strip.text.y = element_text(size = 10)  # Tamaño del texto en las facetas (filas)
-  )
-
-
 #Calcular CWM por C/NC
-#QUE HACER SI NO TENGO ABUNDANCIA?
 
 #RASGOS CUANTITATIVOS
 
